@@ -1,0 +1,113 @@
+# playbook.yml
+- name: Prepare all nodes
+  hosts: all
+  become: yes
+  roles:
+    - k8s-common
+
+- name: Initialize Kubernetes Master
+  hosts: master
+  become: yes
+  roles:
+    - k8s-master
+
+- name: Join Worker Node to the Cluster
+  hosts: worker
+  become: yes
+  roles:
+    - k8s-worker
+
+- name: Deploy NGINX and Ingress Controller
+  hosts: master
+  become: yes
+  tasks:
+    - name: Deploy NGINX ingress controller
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: IngressClass
+          metadata:
+            name: nginx
+          spec:
+            controller: k8s.io/ingress-nginx
+
+    - name: Apply NGINX ingress controller YAML
+      ansible.builtin.shell: |
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.0/deploy/static/provider/cloud/deploy.yaml
+      args:
+        executable: /bin/bash
+
+    - name: Wait for ingress controller to be ready
+      ansible.builtin.shell: |
+        kubectl wait --namespace ingress-nginx \
+          --for=condition=ready pod \
+          --selector=app.kubernetes.io/component=controller \
+          --timeout=180s
+      args:
+        executable: /bin/bash
+
+    - name: Deploy NGINX test app
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: nginx-deployment
+            labels:
+              app: nginx
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: nginx
+            template:
+              metadata:
+                labels:
+                  app: nginx
+              spec:
+                containers:
+                - name: nginx
+                  image: nginx:latest
+                  ports:
+                  - containerPort: 80
+
+    - name: Create NGINX service
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: nginx-service
+          spec:
+            selector:
+              app: nginx
+            ports:
+              - protocol: TCP
+                port: 80
+                targetPort: 80
+
+    - name: Create Ingress rule
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: nginx-ingress
+            annotations:
+              nginx.ingress.kubernetes.io/rewrite-target: /
+          spec:
+            ingressClassName: nginx
+            rules:
+              - http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: nginx-service
+                          port:
+                            number: 80

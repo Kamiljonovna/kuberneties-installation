@@ -1,0 +1,36 @@
+---
+- name: Initialize Kubernetes master
+  command: kubeadm init --pod-network-cidr=10.244.0.0/16
+  register: kubeadm_init
+  args:
+    creates: /etc/kubernetes/admin.conf
+
+- name: Create .kube directory for ansible user
+  file:
+    path: /home/ansible/.kube
+    state: directory
+    owner: ansible
+    group: ansible
+    mode: 0755
+
+- name: Copy kubeconfig to ansible user
+  command: cp /etc/kubernetes/admin.conf /home/ansible/.kube/config
+
+- name: Change ownership of kubeconfig
+  file:
+    path: /home/ansible/.kube/config
+    owner: ansible
+    group: ansible
+    mode: 0644
+
+- name: Install Flannel CNI plugin
+  become: yes
+  become_user: ansible
+  command: >
+    kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+  environment:
+    KUBECONFIG: /home/ansible/.kube/config
+
+- name: Extract kubeadm join command
+  shell: |
+    kubeadm token create --print-join-command > /home/ansible

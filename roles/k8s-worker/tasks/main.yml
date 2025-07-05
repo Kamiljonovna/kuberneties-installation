@@ -1,0 +1,15 @@
+---
+- name: Fetch join command from master
+  delegate_to: master1
+  ansible.builtin.slurp:
+    src: /home/ansible/join-command.sh
+  register: join_cmd_encoded
+
+- name: Decode and save join command
+  copy:
+    content: "{{ join_cmd_encoded.content | b64decode }}"
+    dest: /tmp/join-command.sh
+    mode: '0755'
+
+- name: Join the Kubernetes cluster
+  command: sh /tmp/join-command.sh
